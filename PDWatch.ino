@@ -33,6 +33,7 @@ Menu setTimeMenu;
 Menu setDateMenu;
 Menu setterMenu;
 Menu tempMenu;
+Menu voltMenu;
 
 boolean binaryFormat = false;
 
@@ -102,8 +103,8 @@ void turnScreenOn() {
   if (screenOn) return;
   screenOn = true;
   Serial.println("Turn on screen");
-  digitalWrite(BACKLIGHT_PIN, HIGH); 
-  getDisplay()->writecommand(0x29);
+  //digitalWrite(BACKLIGHT_PIN, HIGH); 
+  //getDisplay()->writecommand(0x29);
 }
 
 void turnScreenOff() {
@@ -112,7 +113,7 @@ void turnScreenOff() {
   getDisplay()->writecommand(0x28);
   digitalWrite(BACKLIGHT_PIN, LOW); 
   screenOn = false;
-  esp_light_sleep_start(); // Belép light sleep módba
+  esp_deep_sleep_start();
 }
 
 // Callback function for Button 1 press
@@ -182,11 +183,12 @@ void setup() {
 
   //Menu
   //static MenuItem configsMenu[MAX_CONFIG_SIZE];
-  static MenuItem mainMenuItems[4] = { 
+  static MenuItem mainMenuItems[5] = { 
         {"Set date", setDateSelected},
         {"Set time", setTimeSelected},
         {"Binary mode ON", switchBinaryMode},
-        {"Temperature", tempSelected}
+        {"Temperature", tempSelected},
+        {"Battery status", voltSelected}
     };
 
 
@@ -205,6 +207,11 @@ void setup() {
   tempMenu.items = {};
   tempMenu.size = 0;
   tempMenu.render = tempMenuRenderer;
+
+  voltMenu.name = "Battery status";
+  voltMenu.items = {};
+  voltMenu.size = 0;
+  voltMenu.render = voltMenuRenderer;
 
   static MenuItem setTimeMenuItems[3] = {
         {"12", setHourMenu},
@@ -363,6 +370,12 @@ void tempSelected() {
   topMenu()->render();
 }
 
+void voltSelected() {
+  pushMenu(&voltMenu);
+  beginRender();
+  topMenu()->render();
+}
+
 void tempMenuRenderer() {
   ButtonState button = getButtonState();
   if (button == BUTTON_CANCEL || button == BUTTON_LONG_PRESS || button == BUTTON_OK) {
@@ -380,6 +393,24 @@ void tempMenuRenderer() {
   display->setTextColor(TFT_YELLOW, TFT_BLACK); // 'inverted' text
   display->setCursor(0, MENU_MIN_Y_POS + 22);
   display->println(String(rtc.getTemperature()) + "C");
+  endRender();
+}
+
+void voltMenuRenderer() {
+  ButtonState button = getButtonState();
+  if (button == BUTTON_CANCEL || button == BUTTON_LONG_PRESS || button == BUTTON_OK) {
+    beginRender();
+    popMenu();
+    topMenu()->render();
+    return;
+  }
+  TFT_eSPI* display = getDisplay();
+  display->fillScreen(TFT_BLACK);
+  // Display Text
+  display->setTextSize(1);
+  display->setTextColor(TFT_YELLOW, TFT_BLACK); // 'inverted' text
+  display->setCursor(0, MENU_MIN_Y_POS + 22);
+  display->println(String(getBatteryVoltage()) + " V");
   endRender();
 }
 
