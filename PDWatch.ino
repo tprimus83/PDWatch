@@ -61,7 +61,7 @@ void setTimeSelected() {
   topMenu()->render();
 }
 
-const int screenOnTime = 6;
+int screenOnTime = 6;
 volatile int loopCounter = 0;
 boolean screenOn = true;
 String tM="ww";
@@ -257,6 +257,7 @@ void loop() {
 
 void printLocalTime() {
   // Óra, perc, másodperc
+  screenOnTime = 6;
   char timeMin[3];
   char timeHour[3];
   char timeSec[3];
@@ -281,7 +282,7 @@ void printLocalTime() {
 
   //Serial.println("refresh:" + String(minute));
 
-  if(tM!=m) {//TODO az orat is figyelni kell
+  if(tM!=m) {
     if (binaryFormat) {
     //Serial.println("call:" + String(minute));
       drawBinaryTime(display, hour, minute);
@@ -313,6 +314,7 @@ void printLocalTime() {
   ButtonState button = getButtonState();
   if (button == BUTTON_OK) {
     Serial.println("Entering main menu");
+    screenOnTime = 30;
     pushMenu(&mainMenu);
     tM="ww";
     beginRender();
@@ -344,7 +346,7 @@ float getBatteryVoltage() {
 // Töltöttség kiszámítása a feszültség alapján
 int calculateBatteryLevel(float voltage) {
   int level = voltage * (float)10;
-  if (voltage >= 41) return 101;
+  if (level >= 41) return 101;
   level = map(level, 30, 37, 0, 100);  // Szorozd meg 10-tel, hogy a map() egész számokkal dolgozhasson
   level = constrain(level, 0, 100);  // Biztosítjuk, hogy a szint 0 és 100 között legyen
   return level;
