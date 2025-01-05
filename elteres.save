@@ -1,0 +1,31 @@
+unsigned long startMillis; // Kezdő millis érték
+unsigned long rtcTime = 0; // Belépési idő másodpercben
+unsigned long lastMillis;
+
+void setup() {
+  Serial.begin(115200);
+
+  // Állítsd be az ESP belső RTC-jét pontos kezdőértékre
+  rtcTime = 0; // Kezdő idő másodpercben
+  startMillis = millis();
+  lastMillis = startMillis;
+
+  Serial.println("Kezdő idő szinkronizálva!");
+}
+
+void loop() {
+  unsigned long currentMillis = millis();
+
+  // Számoljuk a belső időt
+  if (currentMillis - lastMillis >= 1000) {
+    rtcTime++;
+    lastMillis += 1000;
+  }
+
+  // Írjuk ki az aktuális belső időt
+  Serial.print("Belső RTC idő: ");
+  Serial.println(rtcTime);
+
+  // Referenciával összevetve ellenőrizd az eltérést
+  delay(1000); // 1 másodpercenként frissítjük
+}
