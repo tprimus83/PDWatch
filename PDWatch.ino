@@ -9,12 +9,21 @@
 #include <WiFi.h>
 #include <Wire.h>
 #include <RTClib.h>
+#include "driver/ledc.h"
+
 RTC_DS3231 rtc;
 
 // Define button pins
 #define BUTTON1_PIN 35  // Left button
 #define BUTTON2_PIN 0   // Right button
-#define BACKLIGHT_PIN 4
+
+#define UNUSED_1 32     // Szabad GPIO, energiatakarékos módra állítva
+#define UNUSED_2 33     // Szabad GPIO, energiatakarékos módra állítva
+#define UNUSED_3 36     // Szabad GPIO, energiatakarékos módra állítva
+#define UNUSED_4 39     // Szabad GPIO, energiatakarékos módra állítva
+#define UNUSED_5 13     // Szabad GPIO
+#define UNUSED_6 14     // Szabad GPIO
+
 
 // Create Button2 objects for each button
 Button2 upButton(BUTTON1_PIN);
@@ -61,8 +70,11 @@ void setTimeSelected() {
   beginRender();
   topMenu()->render();
 }
+#define DEFAULT_SCREEN_ON_TIME 6
+#define MENU_SCREEN_ON_TIME 30
+#define STOPPER_SCREEN_ON_TIME 1000
 
-int screenOnTime = 6;
+int screenOnTime = DEFAULT_SCREEN_ON_TIME;
 volatile int loopCounter = 0;
 boolean screenOn = true;
 String tM="ww";
@@ -76,8 +88,10 @@ void switchBinaryMode() {
 }
 
 #define background TFT_BLACK
+#define DEFAULT_UPDATE_HZ 1
+#define STOPPER_UPDATE_HZ 5
 
-int displayUpdateRateHz = 1;
+int displayUpdateRateHz = DEFAULT_UPDATE_HZ;
 unsigned long displayLastUpdate;
 unsigned long currentMillis;
 
@@ -104,7 +118,7 @@ void turnScreenOn() {
   if (screenOn) return;
   screenOn = true;
   Serial.println("Turn on screen");
-  //digitalWrite(BACKLIGHT_PIN, HIGH); 
+  //digitalWrite(TFT_BL, HIGH); 
   //getDisplay()->writecommand(0x29);
 }
 
@@ -112,7 +126,7 @@ void turnScreenOff() {
   if (!screenOn) return;
   Serial.println("Turn off screen");
   getDisplay()->writecommand(0x28);
-  digitalWrite(BACKLIGHT_PIN, LOW); 
+  digitalWrite(TFT_BL, LOW); 
   screenOn = false;
   esp_deep_sleep_start();
 }
@@ -161,6 +175,27 @@ void setup() {
   downButton.setLongClickHandler(downButtonLongPressed);   // Long press
 
   beginDisplay();
+  
+  // LEDC konfiguráció
+  ledc_timer_config_t ledc_timer = {
+      .speed_mode       = LEDC_HIGH_SPEED_MODE,
+      .duty_resolution  = LEDC_TIMER_8_BIT,  // 8 bit felbontás
+      .timer_num        = LEDC_TIMER_0,
+      .freq_hz          = 5000,             // Frekvencia: 5 kHz
+      .clk_cfg          = LEDC_AUTO_CLK
+  };
+  ledc_timer_config(&ledc_timer);
+
+  ledc_channel_config_t ledc_channel = {
+      .gpio_num       = TFT_BL,
+      .speed_mode     = LEDC_HIGH_SPEED_MODE,
+      .channel        = LEDC_CHANNEL_0,
+      .intr_type      = LEDC_INTR_DISABLE,
+      .timer_sel      = LEDC_TIMER_0,
+      .duty           = 128,  // 50% fényerő (256 a maximális duty cycle érték 8 bitnél)
+      .hpoint         = 0
+  };
+  ledc_channel_config(&ledc_channel);
   
   Wire.begin(21, 22);
 
@@ -241,6 +276,21 @@ void setup() {
   setDateMenu.render = displayMenu;
   pushTimeMenu();
   loopCounter = 0;
+
+  // Akkumulátor méréshez használt pin
+  pinMode(batteryPin, INPUT);
+  // Nem használt pin-ek energiatakarékos módhoz
+// Nem használt pin-ek energiatakarékos módra állítása
+  pinMode(UNUSED_1, INPUT);
+  pinMode(UNUSED_2, INPUT);
+  pinMode(UNUSED_3, INPUT);
+  pinMode(UNUSED_4, INPUT);
+  pinMode(UNUSED_5, INPUT);
+  pinMode(UNUSED_6, INPUT);
+
+  // További nem használt RTC pin-ek alvó módra állítása
+  pinMode(36, INPUT); // GPIO36 (RTC input)
+  pinMode(39, INPUT); // GPIO39 (RTC input)
 }
 
 void loop() {  
@@ -264,7 +314,7 @@ void loop() {
 
 void printLocalTime() {
   // Óra, perc, másodperc
-  screenOnTime = 6;
+  screenOnTime = DEFAULT_SCREEN_ON_TIME;
   char timeMin[3];
   char timeHour[3];
   char timeSec[3];
@@ -321,7 +371,7 @@ void printLocalTime() {
   ButtonState button = getButtonState();
   if (button == BUTTON_OK) {
     Serial.println("Entering main menu");
-    screenOnTime = 30;
+    screenOnTime = MENU_SCREEN_ON_TIME;
     pushMenu(&mainMenu);
     tM="ww";
     beginRender();
@@ -406,15 +456,15 @@ void printElapsedTime(uint32_t elapsed, int i) {
   uint32_t minutes = (elapsed % 3600) / 60;
   uint32_t seconds = elapsed % 60;
 
+  //int milliseconds = elapsedMillis % 1000;  // Milliszekundumok (ezredmásodpercek)
+  //int tenths = milliseconds / 100;  // Tizedmásodperc
   //debugln("Clear display");
   TFT_eSPI* display = getDisplay();
-  // Clear the buffer.
-  display->fillScreen(TFT_BLACK);
   // Display Text
   display->setTextSize(1);
   display->setTextColor(i == 0 && stopwatchRunning ? ((252 >> 3) << 11) | ((3 >> 2) << 5) | (3 >> 3) : TFT_YELLOW, TFT_BLACK); 
   display->setCursor(0, MENU_MIN_Y_POS + 22 * i);
-  display->println(String(hours) + ":" + String(minutes) + ":" + String(seconds));
+  display->println(String(hours) + ":" + String(minutes) + ":" + String(seconds));// + "." + String(tenths));
 }
 
 // Function to add an elapsed time to the history array
@@ -428,11 +478,20 @@ void addToHistory(uint32_t elapsedTime) {
 }
 
 void displayStopper() {
+  uint32_t elapsedTime;
+  screenOnTime = STOPPER_SCREEN_ON_TIME;
+  displayUpdateRateHz = STOPPER_UPDATE_HZ;
+  if (stopwatchRunning && !stopwatchPaused) {
+    elapsedTime = rtc.now().unixtime() - startTime.unixtime();
+    lastTimes[0] = elapsedTime;
+  }
   ButtonState button = getButtonState();
   if (button == BUTTON_CANCEL || button == BUTTON_OK) {
     beginRender();
     popMenu();
     topMenu()->render();
+    screenOnTime = MENU_SCREEN_ON_TIME;
+    displayUpdateRateHz = DEFAULT_UPDATE_HZ;
     return;
   } else if (button == BUTTON_UP) {
     //start stop
@@ -454,7 +513,7 @@ void displayStopper() {
   } else if (button == BUTTON_DOWN) {
     //stop and reset
     if (stopwatchRunning) {
-      uint32_t elapsedTime = pausedTime;
+      elapsedTime = pausedTime;
       if (!stopwatchPaused) {
         elapsedTime = rtc.now().unixtime() - startTime.unixtime();
       }
@@ -465,8 +524,14 @@ void displayStopper() {
       Serial.print("Stopwatch stopped. Elapsed time: ");
 
       addToHistory(elapsedTime);
+      elapsedTime = 0;
     }
   }
+  
+  TFT_eSPI* display = getDisplay();
+  // Clear the buffer.
+  display->fillScreen(TFT_BLACK);
+
   for (int i = 0; i < 4; i++) {
     printElapsedTime(lastTimes[i], i);
   }
