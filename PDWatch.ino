@@ -32,6 +32,7 @@ Menu mainMenu;
 Menu setTimeMenu;
 Menu setDateMenu;
 Menu setterMenu;
+Menu stopperMenu;
 Menu tempMenu;
 Menu voltMenu;
 
@@ -183,10 +184,11 @@ void setup() {
 
   //Menu
   //static MenuItem configsMenu[MAX_CONFIG_SIZE];
-  static MenuItem mainMenuItems[5] = { 
+  static MenuItem mainMenuItems[6] = { 
         {"Set date", setDateSelected},
         {"Set time", setTimeSelected},
         {"Binary mode ON", switchBinaryMode},
+        {"Stopper", stopperSelected},
         {"Temperature", tempSelected},
         {"Battery status", voltSelected}
     };
@@ -202,6 +204,11 @@ void setup() {
   setterMenu.items = {};
   setterMenu.size = 0;
   setterMenu.render = displayIncreaseDecreaseMenu;
+
+  stopperMenu.name = "Stopper";
+  stopperMenu.items = {};
+  stopperMenu.size = 0;
+  stopperMenu.render = displayStopper;
 
   tempMenu.name = "Temperature";
   tempMenu.items = {};
@@ -345,9 +352,9 @@ float getBatteryVoltage() {
 
 // Töltöttség kiszámítása a feszültség alapján
 int calculateBatteryLevel(float voltage) {
-  int level = voltage * (float)10;
-  if (level >= 41) return 101;
-  level = map(level, 30, 37, 0, 100);  // Szorozd meg 10-tel, hogy a map() egész számokkal dolgozhasson
+  int level = voltage * (float)100;
+  if (level >= 410) return 101;
+  level = map(level, 300, 370, 0, 100);  // Szorozd meg 10-tel, hogy a map() egész számokkal dolgozhasson
   level = constrain(level, 0, 100);  // Biztosítjuk, hogy a szint 0 és 100 között legyen
   return level;
 }
@@ -366,16 +373,104 @@ void setSetterMenu(void (*ifn)(), void (*dfn)(), int num) {
   topMenu()->render();
 }
 
-void tempSelected() {
-  pushMenu(&tempMenu);
+void simpleMenuSelected(Menu *menu) {
+  pushMenu(menu);
   beginRender();
   topMenu()->render();
+} 
+
+void tempSelected() {
+  simpleMenuSelected(&tempMenu);
+}
+
+void stopperSelected() {
+  simpleMenuSelected(&stopperMenu);
 }
 
 void voltSelected() {
-  pushMenu(&voltMenu);
-  beginRender();
-  topMenu()->render();
+  simpleMenuSelected(&voltMenu);
+}
+
+DateTime startTime;               // To store the start time
+uint32_t pausedTime = 0;          // Store elapsed time when paused
+bool stopwatchRunning = false;    // State of the stopwatch
+bool stopwatchPaused = false;     // State of pause
+
+// Array to store the last 4 recorded times (in seconds)
+uint32_t lastTimes[4] = {0, 0, 0, 0};
+
+// Function to calculate and print elapsed time
+void printElapsedTime(uint32_t elapsed, int i) {
+  if (elapsed == 0 && i > 0) return;
+  uint32_t hours = elapsed / 3600;
+  uint32_t minutes = (elapsed % 3600) / 60;
+  uint32_t seconds = elapsed % 60;
+
+  //debugln("Clear display");
+  TFT_eSPI* display = getDisplay();
+  // Clear the buffer.
+  display->fillScreen(TFT_BLACK);
+  // Display Text
+  display->setTextSize(1);
+  display->setTextColor(i == 0 && stopwatchRunning ? ((252 >> 3) << 11) | ((3 >> 2) << 5) | (3 >> 3) : TFT_YELLOW, TFT_BLACK); 
+  display->setCursor(0, MENU_MIN_Y_POS + 22 * i);
+  display->println(String(hours) + ":" + String(minutes) + ":" + String(seconds));
+}
+
+// Function to add an elapsed time to the history array
+void addToHistory(uint32_t elapsedTime) {
+  // Shift the array to make room for the new time at the top
+  for (int i = 3; i > 0; i--) {
+    lastTimes[i] = lastTimes[i - 1];
+  }
+  // Add the new time at the top
+  lastTimes[0] = elapsedTime;
+}
+
+void displayStopper() {
+  ButtonState button = getButtonState();
+  if (button == BUTTON_CANCEL || button == BUTTON_OK) {
+    beginRender();
+    popMenu();
+    topMenu()->render();
+    return;
+  } else if (button == BUTTON_UP) {
+    //start stop
+    if (!stopwatchRunning) {
+      // Start the stopwatch
+      startTime = rtc.now();
+      pausedTime = 0;
+      stopwatchRunning = true;
+      stopwatchPaused = false;
+    } else if (stopwatchPaused) {
+      // Resume the stopwatch
+      startTime = DateTime(rtc.now().unixtime() - pausedTime);  // Adjust startTime to account for paused time
+      stopwatchPaused = false;
+    } else {
+      // Pause the stopwatch
+      pausedTime = rtc.now().unixtime() - startTime.unixtime();
+      stopwatchPaused = true;
+    }
+  } else if (button == BUTTON_DOWN) {
+    //stop and reset
+    if (stopwatchRunning) {
+      uint32_t elapsedTime = pausedTime;
+      if (!stopwatchPaused) {
+        elapsedTime = rtc.now().unixtime() - startTime.unixtime();
+      }
+
+      stopwatchRunning = false;
+      stopwatchPaused = false;
+
+      Serial.print("Stopwatch stopped. Elapsed time: ");
+
+      addToHistory(elapsedTime);
+    }
+  }
+  for (int i = 0; i < 4; i++) {
+    printElapsedTime(lastTimes[i], i);
+  }
+  endRender();
 }
 
 void tempMenuRenderer() {
@@ -454,24 +549,20 @@ void displayIncreaseDecreaseMenu() {
 
 // Év növelése
 void increaseYear() {
-  /**time_t rawtime = lastCorrectedTime.tv_sec;
-  struct tm* timeinfo = localtime(&rawtime);
-  timeinfo->tm_year++;
-  idNumber = timeinfo->tm_year;
-  time_t t = mktime(timeinfo);
-  struct timeval now = { .tv_sec = t };
-  settimeofday(&now, NULL);       // Idő beállítása az RTC-ben*/
+  DateTime now = rtc.now();
+  // Adjust the RTC with the new date
+  DateTime newDate(now.year() + 1, now.month(), now.day(), now.hour(), now.minute(), now.second());
+  rtc.adjust(newDate);
+  idNumber = newDate.year();
 }
 
 // Év csökkentése
 void decreaseYear() {
-  /**time_t rawtime = lastCorrectedTime.tv_sec;
-  struct tm* timeinfo = localtime(&rawtime);
-  timeinfo->tm_year--;
-  idNumber = timeinfo->tm_year;
-  time_t t = mktime(timeinfo);
-  struct timeval now = { .tv_sec = t };
-  settimeofday(&now, NULL);       // Idő beállítása az RTC-ben*/
+  DateTime now = rtc.now();
+  // Adjust the RTC with the new date
+  DateTime newDate(now.year() - 1, now.month(), now.day(), now.hour(), now.minute(), now.second());
+  rtc.adjust(newDate);
+  idNumber = newDate.year();
 }
 
 void setYearMenu() {
@@ -481,26 +572,44 @@ void setYearMenu() {
 
 // Hónap növelése
 void increaseMonth() {
-  /**time_t rawtime = lastCorrectedTime.tv_sec;
-  struct tm* timeinfo = localtime(&rawtime);
-  timeinfo->tm_mon++;
-  if (timeinfo->tm_mon == 11) return;
-  idNumber = timeinfo->tm_mon;
-  time_t t = mktime(timeinfo);
-  struct timeval now = { .tv_sec = t };
-  settimeofday(&now, NULL);       // Idő beállítása az RTC-ben*/
+  DateTime now = rtc.now();
+
+  // Increase the month
+  uint16_t year = now.year();
+  uint8_t month = now.month();
+
+  if (month == 1) {
+    month = 12; // Wrap around to January
+    year++;    // Increment the year
+  } else {
+    month++;   // Increment the month
+  }
+
+  // Adjust the RTC with the new date
+  DateTime newDate(year, month, now.day(), now.hour(), now.minute(), now.second());
+  rtc.adjust(newDate);
+  idNumber = newDate.month();
 }
 
 // Hónap csökkentése
 void decreaseMonth() {
-  // time_t rawtime = lastCorrectedTime.tv_sec;
-  // struct tm* timeinfo = localtime(&rawtime);
-  // if (timeinfo->tm_mon == 0) return;
-  // timeinfo->tm_mon--;
-  // idNumber = timeinfo->tm_mon;
-  // time_t t = mktime(timeinfo);
-  // struct timeval now = { .tv_sec = t };
-  // settimeofday(&now, NULL);       // Idő beállítása az RTC-ben
+  DateTime now = rtc.now();
+
+  // Increase the month
+  uint16_t year = now.year();
+  uint8_t month = now.month();
+
+  if (month == 1) {
+    month = 12; // Wrap around to January
+    year--;    // Increment the year
+  } else {
+    month--;   // Increment the month
+  }
+
+  // Adjust the RTC with the new date
+  DateTime newDate(year, month, now.day(), now.hour(), now.minute(), now.second());
+  rtc.adjust(newDate);
+  idNumber = newDate.month();
 }
 
 void setMonthMenu() {
@@ -509,26 +618,18 @@ void setMonthMenu() {
 
 // Nap növelése
 void increaseDay() {
-  // time_t rawtime = lastCorrectedTime.tv_sec;
-  // struct tm* timeinfo = localtime(&rawtime);
-  // if (timeinfo->tm_mday == 30) return;
-  // timeinfo->tm_mday++;
-  // idNumber = timeinfo->tm_mday + 1;
-  // time_t t = mktime(timeinfo);
-  // struct timeval now = { .tv_sec = t };
-  // settimeofday(&now, NULL);       // Idő beállítása az RTC-ben
+  DateTime dt = rtc.now();
+  dt = dt + TimeSpan(1, 0, 0, 0);
+  rtc.adjust(dt); // Állítsd be a számítógép idejét
+  idNumber = dt.day();
 }
 
 // Nap csökkentése
 void decreaseDay() {
-  // time_t rawtime = lastCorrectedTime.tv_sec;
-  // struct tm* timeinfo = localtime(&rawtime);
-  // if (timeinfo->tm_mday == 0) return;
-  // timeinfo->tm_mday--;
-  // idNumber = timeinfo->tm_mday + 1;
-  // time_t t = mktime(timeinfo);
-  // struct timeval now = { .tv_sec = t };
-  // settimeofday(&now, NULL);       // Idő beállítása az RTC-ben
+  DateTime dt = rtc.now();
+  dt = dt + TimeSpan(-1, 0, 0, 0);
+  rtc.adjust(dt); // Állítsd be a számítógép idejét
+  idNumber = dt.day();
 }
 
 void setDayMenu() {
@@ -537,26 +638,20 @@ void setDayMenu() {
 
 // Óra növelése
 void increaseHour() {
-  // time_t rawtime = lastCorrectedTime.tv_sec;
-  // struct tm* timeinfo = localtime(&rawtime);
-  // if (timeinfo->tm_hour == 23) return;
-  // timeinfo->tm_hour++;
-  // idNumber = timeinfo->tm_hour;
-  // time_t t = mktime(timeinfo);
-  // struct timeval now = { .tv_sec = t };
-  // settimeofday(&now, NULL);       // Idő beállítása az RTC-ben
+  DateTime dt = rtc.now();
+  if (dt.hour() == 23) return;
+  dt = dt + TimeSpan(0, 1, 0, 0);
+  rtc.adjust(dt); // Állítsd be a számítógép idejét
+  idNumber = dt.hour();
 }
 
 // Óra csökkentése
 void decreaseHour() {
-  // time_t rawtime = lastCorrectedTime.tv_sec;
-  // struct tm* timeinfo = localtime(&rawtime);
-  // if (timeinfo->tm_hour == 0) return;
-  // timeinfo->tm_hour--;
-  // idNumber = timeinfo->tm_hour;
-  // time_t t = mktime(timeinfo);
-  // struct timeval now = { .tv_sec = t };
-  // settimeofday(&now, NULL);       // Idő beállítása az RTC-ben
+  DateTime dt = rtc.now();
+  if (dt.hour() == 0) return;
+  dt = dt + TimeSpan(0, -1, 0, 0);
+  rtc.adjust(dt); // Állítsd be a számítógép idejét
+  idNumber = dt.hour();
 }
 
 void setHourMenu() {
@@ -565,26 +660,20 @@ void setHourMenu() {
 
 // Perc növelése
 void increaseMinute() {
-  // time_t rawtime = lastCorrectedTime.tv_sec;
-  // struct tm* timeinfo = localtime(&rawtime);
-  // if (timeinfo->tm_min == 59) return;
-  // timeinfo->tm_min++;
-  // idNumber = timeinfo->tm_min;
-  // time_t t = mktime(timeinfo);
-  // struct timeval now = { .tv_sec = t };
-  // settimeofday(&now, NULL);       // Idő beállítása az RTC-ben
+  DateTime dt = rtc.now();
+  if (dt.minute() == 59) return;
+  dt = dt + TimeSpan(0, 0, 1, 0);
+  rtc.adjust(dt); // Állítsd be a számítógép idejét
+  idNumber = dt.minute();
 }
 
 // Perc csökkentése
 void decreaseMinute() {
-  // time_t rawtime = lastCorrectedTime.tv_sec;
-  // struct tm* timeinfo = localtime(&rawtime);
-  // if (timeinfo->tm_min == 0) return;
-  // timeinfo->tm_min--;
-  // idNumber = timeinfo->tm_min;
-  // time_t t = mktime(timeinfo);
-  // struct timeval now = { .tv_sec = t };
-  // settimeofday(&now, NULL);       // Idő beállítása az RTC-ben
+  DateTime dt = rtc.now();
+  if (dt.minute() == 0) return;
+  dt = dt + TimeSpan(0, 0, -1, 0);
+  rtc.adjust(dt); // Állítsd be a számítógép idejét
+  idNumber = dt.minute();
 }
 
 void setMinuteMenu() {
@@ -593,10 +682,9 @@ void setMinuteMenu() {
 
 // Perc csökkentése
 void resetSecMenu() {
-  // DateTime dt = rtc.datetime();
-  // dt = dt + TimeSpan(0, 0, 0, 30);
-  // rtc.adjust(dt); // Állítsd be a számítógép idejét
-  //TODO
+  DateTime now = rtc.now();
+  DateTime newTime(now.year(), now.month(), now.day(), now.hour(), now.minute(), 0); // Reset seconds to 0
+  rtc.adjust(newTime); // Update RTC with the new time
 }
 
 void drawBinaryTime(TFT_eSPI* display, int hour, int minute) {
