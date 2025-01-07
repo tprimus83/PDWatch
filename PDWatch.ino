@@ -22,7 +22,6 @@ RTC_DS3231 rtc;
 #define UNUSED_3 36     // Szabad GPIO, energiatakarékos módra állítva
 #define UNUSED_4 39     // Szabad GPIO, energiatakarékos módra állítva
 #define UNUSED_5 13     // Szabad GPIO
-#define UNUSED_6 14     // Szabad GPIO
 
 
 // Create Button2 objects for each button
@@ -278,19 +277,14 @@ void setup() {
   loopCounter = 0;
 
   // Akkumulátor méréshez használt pin
-  pinMode(batteryPin, INPUT);
-  // Nem használt pin-ek energiatakarékos módhoz
-// Nem használt pin-ek energiatakarékos módra állítása
+   pinMode(batteryPin, INPUT);
+//   // Nem használt pin-ek energiatakarékos módhoz
+// // Nem használt pin-ek energiatakarékos módra állítása
   pinMode(UNUSED_1, INPUT);
   pinMode(UNUSED_2, INPUT);
   pinMode(UNUSED_3, INPUT);
   pinMode(UNUSED_4, INPUT);
   pinMode(UNUSED_5, INPUT);
-  pinMode(UNUSED_6, INPUT);
-
-  // További nem használt RTC pin-ek alvó módra állítása
-  pinMode(36, INPUT); // GPIO36 (RTC input)
-  pinMode(39, INPUT); // GPIO39 (RTC input)
 }
 
 void loop() {  
