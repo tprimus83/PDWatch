@@ -445,30 +445,34 @@ DateTime startTime;               // To store the start time
 uint32_t pausedTime = 0;          // Store elapsed time when paused
 bool stopwatchRunning = false;    // State of the stopwatch
 bool stopwatchPaused = false;     // State of pause
+unsigned long startMillis = 0;
+unsigned long endMillis = 0;
+uint32_t lastElapsedTime = 0;
 
 // Array to store the last 4 recorded times (in seconds)
-uint32_t lastTimes[4] = {0, 0, 0, 0};
+unsigned long lastTimes[4] = {0, 0, 0, 0};
 
 // Function to calculate and print elapsed time
-void printElapsedTime(uint32_t elapsed, int i) {
-  if (elapsed == 0 && i > 0) return;
+void printElapsedTime(unsigned long elapsedMillis, int i) {
+  if (elapsedMillis == 0 && i > 0) return;
+  int elapsed = elapsedMillis / 1000;
   uint32_t hours = elapsed / 3600;
   uint32_t minutes = (elapsed % 3600) / 60;
   uint32_t seconds = elapsed % 60;
-
-  //int milliseconds = elapsedMillis % 1000;  // Milliszekundumok (ezredmásodpercek)
-  //int tenths = milliseconds / 100;  // Tizedmásodperc
+  
+  int milliseconds = elapsedMillis % 1000;  // Milliszekundumok (ezredmásodpercek)
+  int tenths = milliseconds / 10;  // Tizedmásodperc
   //debugln("Clear display");
   TFT_eSPI* display = getDisplay();
   // Display Text
   display->setTextSize(1);
   display->setTextColor(i == 0 && stopwatchRunning ? ((252 >> 3) << 11) | ((3 >> 2) << 5) | (3 >> 3) : TFT_YELLOW, TFT_BLACK); 
   display->setCursor(0, MENU_MIN_Y_POS + 22 * i);
-  display->println(String(hours) + ":" + String(minutes) + ":" + String(seconds));// + "." + String(tenths));
+  display->println(String(hours) + ":" + String(minutes) + ":" + String(seconds) + "." + String(tenths));
 }
 
 // Function to add an elapsed time to the history array
-void addToHistory(uint32_t elapsedTime) {
+void addToHistory(unsigned long elapsedTime) {
   // Shift the array to make room for the new time at the top
   for (int i = 3; i > 0; i--) {
     lastTimes[i] = lastTimes[i - 1];
@@ -482,8 +486,12 @@ void displayStopper() {
   screenOnTime = STOPPER_SCREEN_ON_TIME;
   displayUpdateRateHz = STOPPER_UPDATE_HZ;
   if (stopwatchRunning && !stopwatchPaused) {
+    lastElapsedTime = elapsedTime;
     elapsedTime = rtc.now().unixtime() - startTime.unixtime();
     lastTimes[0] = elapsedTime;
+    if (lastElapsedTime != elapsedTime) {
+      startMillis = millis();
+    }
   }
   ButtonState button = getButtonState();
   if (button == BUTTON_CANCEL || button == BUTTON_OK) {
@@ -499,6 +507,9 @@ void displayStopper() {
       // Start the stopwatch
       startTime = rtc.now();
       pausedTime = 0;
+      startMillis = millis();
+      endMillis = 0;
+      lastElapsedTime = 0;
       stopwatchRunning = true;
       stopwatchPaused = false;
     } else if (stopwatchPaused) {
@@ -509,8 +520,10 @@ void displayStopper() {
       // Pause the stopwatch
       pausedTime = rtc.now().unixtime() - startTime.unixtime();
       stopwatchPaused = true;
+      loopCounter = 1;
     }
   } else if (button == BUTTON_DOWN) {
+    loopCounter = 1;
     //stop and reset
     if (stopwatchRunning) {
       elapsedTime = pausedTime;
@@ -523,11 +536,16 @@ void displayStopper() {
 
       Serial.print("Stopwatch stopped. Elapsed time: ");
 
-      addToHistory(elapsedTime);
+      addToHistory(elapsedTime * 1000 + ((endMillis - startMillis) % 1000));
       elapsedTime = 0;
+      startMillis = 0;
+      endMillis = 0;
+      lastElapsedTime = 0;
     }
   }
   
+  if (loopCounter != 1) return;
+
   TFT_eSPI* display = getDisplay();
   // Clear the buffer.
   display->fillScreen(TFT_BLACK);
